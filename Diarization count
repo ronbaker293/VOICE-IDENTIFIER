@@ -1,1 +1,67 @@
+import requests
+import time
 
+ASSEMBLYAI_API_KEY = '1242b5dc50824eef972ad6825e4d3dc2'  # Replace with your API Key
+AUDIO_FILENAME = 'your_clip.mp4'  # Path to your MP4 file
+
+def upload_audio(filename):
+    headers = {'authorization': ASSEMBLYAI_API_KEY}
+    with open(filename, 'rb') as f:
+        response = requests.post('https://api.assemblyai.com/v2/upload', headers=headers, data=f)
+    response.raise_for_status()
+    return response.json()['upload_url']
+
+def transcribe_audio(audio_url):
+    endpoint = "https://api.assemblyai.com/v2/transcript"
+    json = {
+        "audio_url": audio_url,
+        "speaker_labels": True
+    }
+    headers = {
+        "authorization": ASSEMBLYAI_API_KEY,
+        "content-type": "application/json"
+    }
+    response = requests.post(endpoint, json=json, headers=headers)
+    response.raise_for_status()
+    return response.json()['id']
+
+def poll_transcription(transcript_id):
+    endpoint = f"https://api.assemblyai.com/v2/transcript/{transcript_id}"
+    headers = {"authorization": ASSEMBLYAI_API_KEY}
+    while True:
+        response = requests.get(endpoint, headers=headers)
+        response.raise_for_status()
+        status = response.json()['status']
+        if status == 'completed':
+            return response.json()
+        elif status == 'failed':
+            raise RuntimeError("Transcription failed")
+        time.sleep(5)
+
+def count_speakers(transcript_json):
+    speakers = set()
+    for utterance in transcript_json.get('utterances', []):
+        speakers.add(utterance['speaker'])
+    return len(speakers)
+
+if __name__ == "__main__":
+    print("Uploading audio...")
+    audio_url = upload_audio(AUDIO_FILENAME)
+    print("Audio uploaded. URL:", audio_url)
+
+    print("Submitting for transcription with diarization...")
+    transcript_id = transcribe_audio(audio_url)
+    print("Transcription ID:", transcript_id)
+
+    print("Waiting for transcription to complete...")
+    transcript_json = poll_transcription(transcript_id)
+
+    # Fetch utterances for speaker info
+    endpoint = f"https://api.assemblyai.com/v2/transcript/{transcript_id}/utterances"
+    headers = {"authorization": ASSEMBLYAI_API_KEY}
+    response = requests.get(endpoint, headers=headers)
+    response.raise_for_status()
+    transcript_json['utterances'] = response.json().get('utterances', [])
+
+    num_speakers = count_speakers(transcript_json)
+    print(f"Number of distinct speakers detected: {num_speakers}")
